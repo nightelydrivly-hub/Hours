@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="sl" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Delovne ure & km</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.3/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+  <style>
+    body { background: #000; overflow-x: hidden; }
+    #canvas { position: fixed; inset: 0; z-index: -1; }
+    .glass { 
+      background: rgba(255,255,255,0.06);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.37);
+    }
+    #calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+    .cal-day { 
+      padding: 10px; 
+      text-align: center; 
+      border-radius: 8px; 
+      cursor: pointer; 
+      transition: all 0.2s; 
+      min-height: 60px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .cal-day:hover { background: rgba(255,255,255,0.12); transform: scale(1.05); }
+    .cal-has-entry { background: rgba(34,197,94,0.25); }
+    .cal-selected { border: 2px solid #22c55e; box-shadow: 0 0 12px rgba(34,197,94,0.5); }
+    .cal-weekday { color: #9ca3af; font-weight: bold; text-align: center; }
+    #modal, #objectModal { 
+      display: none; 
+      position: fixed; 
+      inset: 0; 
+      background: rgba(0,0,0,0.7); 
+      z-index: 1000; 
+      align-items: center; 
+      justify-content: center; 
+    }
+    .modal-content { 
+      background: rgba(30,30,40,0.95); 
+      border: 1px solid #4ade80; 
+      border-radius: 16px; 
+      padding: 24px; 
+      max-width: 420px; 
+      width: 90%; 
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6); 
+    }
+    .month-day-row:hover { background: rgba(255,255,255,0.08); }
+  </style>
+</head>
+<body class="min-h-screen text-gray-100 font-sans">
+
+<canvas id="canvas"></canvas>
+
+<div class="relative z-10 container mx-auto p-4 md:p-6 max-w-5xl">
+
+  <div class="flex justify-between items-center mb-6">
+    <h1 class="text-3xl md:text-4xl font-bold bg-gradient-to-r from-green-400 to-teal-400 bg-clip-text text-transparent">
+      Delovne ure & km
+    </h1>
+    <button id="exportCurrentPdf" class="px-5 py-2.5 bg-gradient-to-r from-red-600 to-rose-700 text-white font-semibold rounded-lg hover:brightness-110 transition shadow-md">
+      PDF (trenutni mesec)
+    </button>
+  </div>
+
+  <!-- Koledar -->
+  <div class="glass rounded-2xl p-5 md:p-7 mb-6">
+    <div class="flex justify-between items-center mb-4">
+      <button onclick="changeCalMonth(-1)" class="px-4 py-2 bg-white/10 rounded-lg hover:bg-white/20">◀ Prejšnji</button>
+      <h2 id="calMonth" class="text-xl font-bold"></h2>
+      <button onclick="changeCalMonth(1)" class="px-4 py-2 bg-white/10 rounded-lg hover:bg-white/20">Naslednji ▶</button>
+    </div>
+    <div class="grid grid-cols-7 gap-2 mb-3 cal-weekday">
+      <div>Pon</div><div>Tor</div><div>Sre</div><div>Čet</div><div>Pet</div><div>Sob</div><div>Ned</div>
+    </div>
+    <div id="calendar" class="text-sm"></div>
+  </div>
+
+  <!-- Povzetek za trenutni mesec -->
+  <div class="glass rounded-2xl p-5 md:p-7 mb-6">
+    <h2 class="text-xl font-semibold mb-4 text-center">Povzetek za <span id="summaryMonth"></span></h2>
+    <div id="currentMonthSummary" class="space-y-4"></div>
+  </div>
+
+  <!-- Modal za vnos ure -->
+  <div id="modal">
+    <div class="modal-content">
+      <h3 id="modalTitle" class="text-xl font-bold mb-4"></h3>
+      <form id="modalForm" class="space-y-4">
+        <input type="hidden" id="modalDate">
+        <div>
+          <label class="block text-sm mb-1">Delovne ure</label>
+          <input type="number" id="modalHours" step="0.5" min="0" class="w-full p-3 bg-white/10 border border-white/20 rounded-lg focus:outline-none focus:border-teal-400" required>
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Objekt</label>
+          <div class="flex gap-2">
+            <select id="modalObject" class="flex-1 p-3 bg-white/10 border border-white/20 rounded-lg focus:outline-none focus:border-teal-400" required>
+              <option value="">Izberi objekt...</option>
+            </select>
+            <button type="button" onclick="openObjectModal()" class="px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-lg hover:brightness-110">
+              +
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Kilometri</label>
+          <input type="number" id="modalKm" min="0" class="w-full p-3 bg-white/10 border border-white/20 rounded-lg focus:outline-none focus:border-teal-400" required>
+        </div>
+        <div class="flex gap-3">
+          <button type="submit" class="flex-1 py-3 bg-gradient-to-r from-green-500 to-teal-500 text-black font-semibold rounded-lg hover:brightness-110">
+            Shrani
+          </button>
+          <button type="button" onclick="closeModal()" class="flex-1 py-3 bg-gray-600 hover:bg-gray-500 rounded-lg">
+            Prekliči
+          </button>
+          <button type="button" id="deleteBtn" onclick="deleteEntry()" class="flex-1 py-3 bg-gradient-to-r from-red-600 to-rose-700 text-white font-semibold rounded-lg hover:brightness-110 hidden">
+            Izbriši
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal za dodajanje novega objekta -->
+  <div id="objectModal">
+    <div class="modal-content">
+      <h3 class="text-xl font-bold mb-4">Dodaj nov objekt</h3>
+      <form id="objectForm" class="space-y-4">
+        <input type="text" id="newObjectName" placeholder="Ime objekta / lokacije" class="w-full p-3 bg-white/10 border border-white/20 rounded-lg focus:outline-none focus:border-blue-400" required autofocus>
+        <div class="flex gap-3">
+          <button type="submit" class="flex-1 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-semibold rounded-lg hover:brightness-110">
+            Dodaj
+          </button>
+          <button type="button" onclick="closeObjectModal()" class="flex-1 py-3 bg-gray-600 hover:bg-gray-500 rounded-lg">
+            Prekliči
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── 3D ozadje (enako kot prej) ─────────────────────────────────────
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 2000);
+const renderer = new THREE.WebGLRenderer({canvas: document.getElementById('canvas'), alpha:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
+
+const count = innerWidth < 768 ? 1500 : 3000;
+const pos = new Float32Array(count * 3);
+const colors = new Float32Array(count * 3);
+for(let i=0; i<count*3; i+=3) {
+  pos[i] = (Math.random()-0.5)*2000;
+  pos[i+1] = (Math.random()-0.5)*2000;
+  pos[i+2] = (Math.random()-0.5)*2000;
+  colors[i] = Math.random()*0.4 + 0.3;
+  colors[i+1] = Math.random()*0.6 + 0.4;
+  colors[i+2] = 0.8 + Math.random()*0.2;
+}
+const geo = new THREE.BufferGeometry();
+geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+geo.setAttribute('color', new THREE.BufferAttribute(colors,3));
+
+const mat = new THREE.PointsMaterial({vertexColors: true, size: innerWidth<768?1.8:2.5, transparent:true, opacity:0.7, blending:THREE.AdditiveBlending});
+const particles = new THREE.Points(geo, mat);
+scene.add(particles);
+camera.position.z = innerWidth < 768 ? 700 : 500;
+
+let mouseX = 0, mouseY = 0;
+document.addEventListener('mousemove', e => {
+  mouseX = (e.clientX / innerWidth) * 2 - 1;
+  mouseY = -(e.clientY / innerHeight) * 2 + 1;
+});
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  mat.size = innerWidth<768?1.8:2.5;
+});
+
+function anim() {
+  requestAnimationFrame(anim);
+  particles.rotation.y += 0.00008;
+  camera.position.x += (mouseX * 120 - camera.position.x) * 0.04;
+  camera.position.y += (mouseY * 120 - camera.position.y) * 0.04;
+  renderer.render(scene, camera);
+}
+anim();
+
+// ─── Podatki ────────────────────────────────────────────────────────
+let data = JSON.parse(localStorage.getItem('delovneUre')) || [];
+let objects = JSON.parse(localStorage.getItem('delovniObjekti')) || []; // seznam objektov
+let currentCalDate = new Date();
+
+const dniVTednu = ['Nedelja', 'Ponedeljek', 'Torek', 'Sreda', 'Četrtek', 'Petek', 'Sobota'];
+
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-');
+  return `${d}.${m}.${y}`;
+}
+
+function getDayName(dateStr) {
+  if (!dateStr) return '';
+  return dniVTednu[new Date(dateStr).getDay()];
+}
+
+function formatFullDate(dateStr) {
+  return `${getDayName(dateStr)}, ${formatDate(dateStr)}`;
+}
+
+function saveData() {
+  localStorage.setItem('delovneUre', JSON.stringify(data));
+  localStorage.setItem('delovniObjekti', JSON.stringify(objects));
+  renderCalendar();
+  renderCurrentMonthSummary();
+  updateObjectSelect();
+}
+
+function findEntry(dateStr) {
+  return data.find(e => e.date === dateStr);
+}
+
+// ─── Modal za ure ───────────────────────────────────────────────────
+function openModal(dateStr) {
+  document.getElementById('modal').style.display = 'flex';
+  document.getElementById('modalDate').value = dateStr;
+  document.getElementById('modalTitle').textContent = `Vnos za ${formatFullDate(dateStr)}`;
+
+  const entry = findEntry(dateStr);
+  const deleteBtn = document.getElementById('deleteBtn');
+
+  if (entry) {
+    document.getElementById('modalHours').value = entry.hours;
+    document.getElementById('modalObject').value = entry.object;
+    document.getElementById('modalKm').value = entry.km;
+    deleteBtn.classList.remove('hidden');
+  } else {
+    document.getElementById('modalHours').value = '';
+    document.getElementById('modalObject').value = '';
+    document.getElementById('modalKm').value = '';
+    deleteBtn.classList.add('hidden');
+  }
+}
+
+function closeModal() {
+  document.getElementById('modal').style.display = 'none';
+}
+
+function deleteEntry() {
+  const date = document.getElementById('modalDate').value;
+  if (!confirm(`Res izbrišem vnos za ${formatFullDate(date)}?`)) return;
+
+  data = data.filter(e => e.date !== date);
+  saveData();
+  closeModal();
+}
+
+document.getElementById('modalForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const date = document.getElementById('modalDate').value;
+  const hours = parseFloat(document.getElementById('modalHours').value);
+  const object = document.getElementById('modalObject').value.trim();
+  const km = parseFloat(document.getElementById('modalKm').value);
+
+  if (isNaN(hours) || !object || isNaN(km)) {
+    alert('Izpolni vsa polja pravilno!');
+    return;
+  }
+
+  const idx = data.findIndex(e => e.date === date);
+  if (idx >= 0) {
+    data[idx] = { date, hours, object, km };
+  } else {
+    data.push({ date, hours, object, km });
+    data.sort((a,b) => new Date(a.date) - new Date(b.date));
+  }
+
+  saveData();
+  closeModal();
+});
+
+// ─── Modal za nov objekt ────────────────────────────────────────────
+function openObjectModal() {
+  document.getElementById('objectModal').style.display = 'flex';
+  document.getElementById('newObjectName').value = '';
+  document.getElementById('newObjectName').focus();
+}
+
+function closeObjectModal() {
+  document.getElementById('objectModal').style.display = 'none';
+}
+
+document.getElementById('objectForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = document.getElementById('newObjectName').value.trim();
+  if (!name) return alert('Vpiši ime objekta!');
+
+  if (objects.includes(name)) {
+    alert('Ta objekt že obstaja!');
+    return;
+  }
+
+  objects.push(name);
+  objects.sort((a,b) => a.localeCompare(b));
+  saveData(); // shrani tudi objekte
+  closeObjectModal();
+
+  // po dodajanju avtomatično izberi nov objekt v dropdownu
+  document.getElementById('modalObject').value = name;
+});
+
+// ─── Posodobi spustni seznam objektov ──────────────────────────────
+function updateObjectSelect() {
+  const select = document.getElementById('modalObject');
+  select.innerHTML = '<option value="">Izberi objekt...</option>';
+  
+  objects.forEach(obj => {
+    const option = document.createElement('option');
+    option.value = obj;
+    option.textContent = obj;
+    select.appendChild(option);
+  });
+}
+
+// ─── Koledar ────────────────────────────────────────────────────────
+function renderCalendar() {
+  const calendar = document.getElementById('calendar');
+  const calMonth = document.getElementById('calMonth');
+  calendar.innerHTML = '';
+
+  const year = currentCalDate.getFullYear();
+  const month = currentCalDate.getMonth();
+  calMonth.textContent = currentCalDate.toLocaleString('sl-SI', { month: 'long', year: 'numeric' });
+
+  const firstDay = new Date(year, month, 1).getDay() || 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  for (let i = 1; i < firstDay; i++) {
+    calendar.innerHTML += '<div></div>';
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const entry = findEntry(dateStr);
+
+    const div = document.createElement('div');
+    div.className = 'cal-day';
+    if (entry) div.classList.add('cal-has-entry');
+
+    div.innerHTML = `
+      <div class="font-bold">${day}</div>
+      ${entry ? `<div class="text-xs text-green-300">${entry.hours}h</div>` : ''}
+    `;
+
+    div.onclick = () => openModal(dateStr);
+    calendar.appendChild(div);
+  }
+
+  renderCurrentMonthSummary();
+}
+
+function changeCalMonth(delta) {
+  currentCalDate.setMonth(currentCalDate.getMonth() + delta);
+  renderCalendar();
+}
+
+// ─── Povzetek za trenutni mesec ─────────────────────────────────────
+function renderCurrentMonthSummary() {
+  const container = document.getElementById('currentMonthSummary');
+  const title = document.getElementById('summaryMonth');
+  container.innerHTML = '';
+
+  const year = currentCalDate.getFullYear();
+  const month = currentCalDate.getMonth() + 1;
+  const monthStr = `${year}-${String(month).padStart(2,'0')}`;
+  title.textContent = currentCalDate.toLocaleString('sl-SI', { month: 'long', year: 'numeric' });
+
+  const entries = data.filter(e => e.date.startsWith(monthStr));
+  if (entries.length === 0) {
+    container.innerHTML = '<p class="text-center text-gray-500 py-6">Za ta mesec še ni vnosov</p>';
+    return;
+  }
+
+  const totalH = entries.reduce((sum, e) => sum + e.hours, 0);
+  const totalK = entries.reduce((sum, e) => sum + e.km, 0);
+  const days = entries.length;
+
+  const summaryDiv = document.createElement('div');
+  summaryDiv.className = 'glass rounded-xl p-5 mb-5';
+  summaryDiv.innerHTML = `
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+      <div>
+        <div class="text-sm text-gray-400">Delovni dnevi</div>
+        <div class="text-2xl font-bold text-green-300">${days}</div>
+      </div>
+      <div>
+        <div class="text-sm text-gray-400">Skupaj ur</div>
+        <div class="text-2xl font-bold text-green-400">${totalH.toFixed(1)}</div>
+      </div>
+      <div>
+        <div class="text-sm text-gray-400">Skupaj km</div>
+        <div class="text-2xl font-bold text-blue-400">${totalK}</div>
+      </div>
+      <div>
+        <div class="text-sm text-gray-400">Povprečje ur/dan</div>
+        <div class="text-2xl font-bold text-teal-300">${(totalH / days).toFixed(1)}</div>
+      </div>
+    </div>
+  `;
+  container.appendChild(summaryDiv);
+
+  // Seznam po dnevih
+  const listDiv = document.createElement('div');
+  listDiv.className = 'space-y-2';
+  entries.forEach(entry => {
+    const row = document.createElement('div');
+    row.className = 'month-day-row glass rounded-lg p-3 cursor-pointer hover:bg-white/10 transition flex justify-between items-center';
+    row.innerHTML = `
+      <div>
+        <div class="font-medium">${formatFullDate(entry.date)}</div>
+        <div class="text-sm text-gray-400">${entry.object}</div>
+      </div>
+      <div class="text-right">
+        <div class="font-bold text-green-300">${entry.hours} h</div>
+        <div class="text-sm text-blue-300">${entry.km} km</div>
+      </div>
+    `;
+    row.onclick = () => openModal(entry.date);
+    listDiv.appendChild(row);
+  });
+  container.appendChild(listDiv);
+}
+
+// ─── PDF za trenutni mesec ──────────────────────────────────────────
+document.getElementById('exportCurrentPdf').addEventListener('click', () => {
+  const year = currentCalDate.getFullYear();
+  const mon = currentCalDate.getMonth() + 1;
+  const monthStr = `${year}-${String(mon).padStart(2,'0')}`;
+
+  const filtered = data.filter(e => e.date.startsWith(monthStr));
+  if (filtered.length === 0) {
+    alert('Za ta mesec ni vnosov.');
+    return;
+  }
+
+  const totalHours = filtered.reduce((sum, e) => sum + e.hours, 0);
+  const totalKm    = filtered.reduce((sum, e) => sum + e.km, 0);
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+  const left = 12;
+  const top = 10;
+
+  doc.setFontSize(14);
+  doc.setTextColor(34, 197, 94);
+  doc.setFont("helvetica", "bold");
+  doc.text(`Delovne ure & km – ${currentCalDate.toLocaleString('sl-SI', {month:'long', year:'numeric'})}`, left, top);
+
+  doc.setFontSize(8);
+  doc.setTextColor(140);
+  doc.text(`Izvoženo: ${new Date().toLocaleDateString('sl-SI')}`, left, top + 6);
+
+  doc.autoTable({
+    startY: top + 12,
+    margin: { left: left, right: left },
+    head: [['Datum', 'Dan', 'Ure', 'Objekt', 'km']],
+    body: filtered.map(e => [
+      formatDate(e.date),
+      getDayName(e.date),
+      e.hours.toFixed(1),
+      e.object,
+      e.km
+    ]),
+    foot: [['SKUPAJ', '', totalHours.toFixed(1), '', totalKm]],
+    theme: 'grid',
+    styles: { fontSize: 9, cellPadding: 2.5, lineHeight: 1.15, textColor: [220,220,220] },
+    headStyles: { fillColor: [30,64,175], textColor: [255,255,255], fontStyle: 'bold', halign: 'center' },
+    footStyles: { fillColor: [22,101,52], textColor: [255,255,255], fontStyle: 'bold' },
+    columnStyles: {
+      0: { cellWidth: 30, halign: 'left' },
+      1: { cellWidth: 25, halign: 'left' },
+      2: { cellWidth: 20, halign: 'right' },
+      3: { cellWidth: 70, halign: 'left' },
+      4: { cellWidth: 25, halign: 'right' }
+    },
+    didParseCell: data => {
+      if (data.row.section === 'foot' && (data.column.index === 2 || data.column.index === 4)) {
+        data.cell.styles.halign = 'right';
+      }
+    }
+  });
+
+  doc.save(`delovne_ure_${String(mon).padStart(2,'0')}_${year}.pdf`);
+});
+
+// Inicializacija
+renderCalendar();
+renderCurrentMonthSummary();
+updateObjectSelect();
+</script>
+</body>
+</html>
