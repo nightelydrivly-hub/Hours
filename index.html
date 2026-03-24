@@ -468,7 +468,7 @@ document.getElementById('exportCurrentPdf').addEventListener('click', () => {
   doc.setFontSize(14);
   doc.setTextColor(34, 197, 94);
   doc.setFont("helvetica", "bold");
-  doc.text(`Delovne ure & km – ${currentCalDate.toLocaleString('sl-SI', {month:'long', year:'numeric'})}`, left, top);
+  doc.text(`Delovne ure – ${currentCalDate.toLocaleString('sl-SI', {month:'long', year:'numeric'})}`, left, top);
 
   doc.setFontSize(8);
   doc.setTextColor(140);
@@ -487,7 +487,7 @@ document.getElementById('exportCurrentPdf').addEventListener('click', () => {
     ]),
     foot: [['SKUPAJ', '', totalHours.toFixed(1), '', totalKm]],
     theme: 'grid',
-    styles: { fontSize: 9, cellPadding: 2.5, lineHeight: 1.15, textColor: [220,220,220] },
+    styles: { fontSize: 9, cellPadding: 2.5, lineHeight: 1.15, textColor: [0,0,0] },
     headStyles: { fillColor: [30,64,175], textColor: [255,255,255], fontStyle: 'bold', halign: 'center' },
     footStyles: { fillColor: [22,101,52], textColor: [255,255,255], fontStyle: 'bold' },
     columnStyles: {
